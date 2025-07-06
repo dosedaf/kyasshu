@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net"
+
+	"github.com/dosedaf/kyasshu/resp"
 )
 
 func main() {
@@ -31,17 +33,11 @@ func handleConnection(c net.Conn) {
 	defer c.Close()
 
 	for {
-		msg, err := reader.ReadString('\n')
+		n, err := resp.Parse(reader)
 		if err != nil {
-			c.Close()
+			log.Fatal(err)
 			return
 		}
-
-		fmt.Printf("%s", msg)
-		if _, err := c.Write([]byte(msg)); err != nil {
-			c.Close()
-			return
-		}
+		fmt.Println(n)
 	}
-
 }
