@@ -3,7 +3,6 @@ package resp
 import (
 	"bufio"
 	"io"
-	"log"
 	"strconv"
 	"strings"
 )
@@ -11,7 +10,6 @@ import (
 func Parse(reader *bufio.Reader) ([]string, error) {
 	dataType, err := reader.ReadByte()
 	if err != nil {
-		log.Fatal(err)
 		return nil, err
 	}
 
@@ -27,27 +25,23 @@ func parseArray(reader *bufio.Reader) ([]string, error) {
 
 	line, err := reader.ReadString('\n')
 	if err != nil {
-		log.Fatal(err)
 		return nil, err
 	}
 
 	count, err := strconv.Atoi(strings.TrimSuffix(line, "\r\n"))
 	if err != nil {
-		log.Fatal(err)
 		return nil, err
 	}
 
 	for i := 0; i < count; i++ {
 		elemType, err := reader.ReadByte()
 		if err != nil {
-			log.Fatal(err)
 			return nil, err
 		}
 
 		if elemType == '$' {
 			str, err := parseBulkStrings(reader)
 			if err != nil {
-				log.Fatal(err)
 				return nil, err
 			}
 
@@ -62,27 +56,23 @@ func parseArray(reader *bufio.Reader) ([]string, error) {
 func parseBulkStrings(reader *bufio.Reader) (string, error) {
 	line, err := reader.ReadString('\n')
 	if err != nil {
-		log.Fatal(err)
 		return "", err
 	}
 
-	len, err := strconv.Atoi(strings.TrimSuffix(line, "\r\n"))
+	length, err := strconv.Atoi(strings.TrimSuffix(line, "\r\n"))
 	if err != nil {
-		log.Fatal(err)
 		return "", err
 	}
 
-	payload := make([]byte, len)
+	payload := make([]byte, length)
 
 	_, err = io.ReadFull(reader, payload)
 	if err != nil {
-		log.Fatal(err)
 		return "", err
 	}
 
 	_, err = reader.Discard(2)
 	if err != nil {
-		log.Fatal(err)
 		return "", err
 	}
 

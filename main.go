@@ -5,9 +5,19 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"sync"
 
 	"github.com/dosedaf/kyasshu/resp"
 )
+
+type dataStore struct {
+	mtx  sync.Mutex
+	data map[string]string
+}
+
+var ds = dataStore{
+	data: make(map[string]string),
+}
 
 func main() {
 	l, err := net.Listen("tcp4", ":6379")
@@ -28,16 +38,41 @@ func main() {
 }
 
 func handleConnection(c net.Conn) {
-	fmt.Printf("serving %s\n", c.RemoteAddr().String())
 	reader := bufio.NewReader(c)
 	defer c.Close()
 
 	for {
-		n, err := resp.Parse(reader)
+		cmd, err := resp.Parse(reader)
 		if err != nil {
-			log.Fatal(err)
+			log.Print(err)
 			return
 		}
-		fmt.Println(n)
+
+		switch cmd[0] {
+		case "PING":
+			c.Write([]byte("+PONG\r\n"))
+		case "SET":
+			ds.mtx.Lock()
+			ds.data[cmd[1]] = cmd[2]
+			ds.mtx.Unlock()
+			c.Write([]byte("+OK\r\n"))
+		case "GET":
+			ds.mtx.Lock()
+
+			val, ok := ds.data[cmd[1]]
+			ds.mtx.Unlock()
+
+			if !ok {
+				c.Write([]byte("$-1\r\n"))
+			} else {
+				resp := fmt.Sprintf("$%d\r\n%s\r\n", len(val), val)
+				c.Write([]byte(resp))
+			}
+
+		default:
+			c.Write([]byte("-ERR unknown command\r\n"))
+		}
+
+		fmt.Println(cmd)
 	}
 }
