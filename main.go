@@ -6,7 +6,6 @@ import (
 	"log"
 	"net"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -74,15 +73,13 @@ func handleConnection(c net.Conn) {
 			val, ok := ds.data[cmd[1]]
 			ds.mtx.Unlock()
 
-			fmt.Println(val)
-			fmt.Println(ok)
-
 			if !ok {
 				c.Write([]byte("$-1\r\n"))
 			} else {
-				if val.expiresAt.IsZero() {
-					c.Write([]byte("$-1\r\n"))
-				} else if !time.Now().Before(val.expiresAt) {
+				if !val.expiresAt.IsZero() && !time.Now().Before(val.expiresAt) {
+					ds.mtx.Lock()
+					delete(ds.data, cmd[1])
+					ds.mtx.Unlock()
 					c.Write([]byte("$-1\r\n"))
 				} else {
 					resp := fmt.Sprintf("$%d\r\n%s\r\n", len(val.value), val.value)
@@ -127,25 +124,16 @@ func handleConnection(c net.Conn) {
 			fmt.Println("here")
 
 			if !ok {
-				c.Write([]byte("$-1\r\n"))
+				c.Write([]byte(":-2\r\n"))
 			} else {
 				if val.expiresAt.IsZero() {
-					c.Write([]byte("$-1\r\n"))
+					c.Write([]byte(":-1\r\n"))
 				} else if !time.Now().Before(val.expiresAt) {
 					c.Write([]byte(":-2\r\n"))
 				} else {
-					t1 := time.Now().Local()
-					diff := val.expiresAt.Sub(t1)
-					diffSlice := strings.Split(diff.String(), ".")
-					diffInt, err := strconv.Atoi(diffSlice[0])
-					fmt.Println(diffInt, diff)
-					if err != nil {
-						c.Write([]byte("$-1\r\n"))
-					} else {
-						resp := fmt.Sprintf(":%d\r\n", diffInt)
-						c.Write([]byte(resp))
-					}
-
+					remainingSeconds := time.Until(val.expiresAt).Seconds()
+					resp := fmt.Sprintf(":%d\r\n", int(remainingSeconds))
+					c.Write([]byte(resp))
 				}
 			}
 
