@@ -5,18 +5,26 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strconv"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/dosedaf/kyasshu/resp"
 )
 
+type valueEntry struct {
+	value     string
+	expiresAt time.Time
+}
+
 type dataStore struct {
 	mtx  sync.Mutex
-	data map[string]string
+	data map[string]valueEntry
 }
 
 var ds = dataStore{
-	data: make(map[string]string),
+	data: make(map[string]valueEntry),
 }
 
 func main() {
@@ -53,8 +61,12 @@ func handleConnection(c net.Conn) {
 			c.Write([]byte("+PONG\r\n"))
 		case "SET":
 			ds.mtx.Lock()
-			ds.data[cmd[1]] = cmd[2]
+			ds.data[cmd[1]] = valueEntry{
+				value: cmd[2],
+			}
+
 			ds.mtx.Unlock()
+
 			c.Write([]byte("+OK\r\n"))
 		case "GET":
 			ds.mtx.Lock()
@@ -62,11 +74,79 @@ func handleConnection(c net.Conn) {
 			val, ok := ds.data[cmd[1]]
 			ds.mtx.Unlock()
 
+			fmt.Println(val)
+			fmt.Println(ok)
+
 			if !ok {
 				c.Write([]byte("$-1\r\n"))
 			} else {
-				resp := fmt.Sprintf("$%d\r\n%s\r\n", len(val), val)
-				c.Write([]byte(resp))
+				if val.expiresAt.IsZero() {
+					c.Write([]byte("$-1\r\n"))
+				} else if !time.Now().Before(val.expiresAt) {
+					c.Write([]byte("$-1\r\n"))
+				} else {
+					resp := fmt.Sprintf("$%d\r\n%s\r\n", len(val.value), val.value)
+					c.Write([]byte(resp))
+				}
+			}
+		case "EXPIRE":
+			ds.mtx.Lock()
+
+			val, ok := ds.data[cmd[1]]
+
+			ds.mtx.Unlock()
+
+			if !ok {
+				c.Write([]byte(":0\r\n"))
+			} else {
+				sec, err := strconv.Atoi(cmd[2])
+				if err != nil {
+					c.Write([]byte(":0\r\n"))
+				} else {
+					timein := time.Now().Local().Add(time.Second * time.Duration(sec))
+
+					ds.mtx.Lock()
+
+					ds.data[cmd[1]] = valueEntry{
+						value:     val.value,
+						expiresAt: timein,
+					}
+
+					ds.mtx.Unlock()
+
+					c.Write([]byte(":1\r\n"))
+				}
+
+			}
+		case "TTL":
+			ds.mtx.Lock()
+
+			val, ok := ds.data[cmd[1]]
+			ds.mtx.Unlock()
+
+			fmt.Println("here")
+
+			if !ok {
+				c.Write([]byte("$-1\r\n"))
+			} else {
+				if val.expiresAt.IsZero() {
+					c.Write([]byte("$-1\r\n"))
+				} else if !time.Now().Before(val.expiresAt) {
+					c.Write([]byte(":-2\r\n"))
+				} else {
+					t1 := time.Now().Local()
+					diff := val.expiresAt.Sub(t1)
+					diffSlice := strings.Split(diff.String(), ".")
+					diffInt, err := strconv.Atoi(diffSlice[0])
+					fmt.Println(diffInt, diff)
+					if err != nil {
+						c.Write([]byte("$-1\r\n"))
+					} else {
+						resp := fmt.Sprintf(":%d\r\n", diffInt)
+						c.Write([]byte(resp))
+					}
+
+				}
 			}
 
 		default:
