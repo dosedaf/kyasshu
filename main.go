@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -136,7 +137,27 @@ func handleConnection(c net.Conn) {
 					c.Write([]byte(resp))
 				}
 			}
+		case "DEL":
+			// get the keys, then delete(ds.data, keys)
+			// get how much keys
+			// DEL key1 key2 keygaada
+			// keys = cmd-1, ingat nonexistentkey
+			keys := slices.Clone(cmd[1:])
+			var deleted int
 
+			ds.mtx.Lock()
+			for _, key := range keys {
+				_, ok := ds.data[key]
+				if ok {
+					delete(ds.data, key)
+					deleted++
+				}
+			}
+			ds.mtx.Unlock()
+
+			resp := fmt.Sprintf(":%d\r\n", deleted)
+
+			c.Write([]byte(resp))
 		default:
 			c.Write([]byte("-ERR unknown command\r\n"))
 		}
