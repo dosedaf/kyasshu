@@ -2,15 +2,17 @@
 
 Kyasshu (Japanese for "Cache") is a simple, in-memory key-value store built from scratch in Go. It is inspired by Redis and implements the RESP (REdis Serialization Protocol) to handle commands concurrently.
 
-This project was built as a deep dive into low-level networking, concurrency patterns, protocol implementation, and data structures in Go.
+This project was built as a deep dive into low-level networking, advanced concurrency patterns, protocol implementation, and software architecture in Go.
 
 ---
 
 ## ✨ Features
-
-* **TCP Server** handling multiple concurrent clients using Goroutines.
-* **RESP Parser** to decode client commands from the raw network stream.
-* **Thread-Safe Data Store** using mutexes to prevent race conditions.
+* **🚀 High-Performance Concurrent Architecture**:
+    * The data store is sharded across multiple partitions, each protected by its own `RWMutex` (Read-Write Lock).
+    * This allows for true parallel processing of commands on different keys, minimizing lock contention and maximizing throughput.
+* **🔌 Concurrent TCP Server**: Handles multiple simultaneous clients using Goroutines.
+* **📝 RESP Parser**: Decodes client commands from the raw network stream.
+* **🧱 Modular Design**: Server logic (`main`), data storage (`KeyValueStore`), and protocol formatting (`resp`) are separated into distinct packages for clean, testable code.
 * **Core Commands Implemented**:
     * `PING`: Checks for a connection.
     * `SET key value`: Stores a string value.
@@ -81,7 +83,7 @@ OK
 
 This project is a foundation. The next major engineering challenges to tackle are:
 
-* 🚀 **Performance & Concurrency**: Refactor the current single-lock data store into a sharded map. This will remove the global bottleneck and allow for true parallel processing of commands on different keys.
+* 🔬 **Benchmarking**: Write a comprehensive benchmark suite using Go's testing package to measure operations per second and validate the performance gains from the sharded architecture.
 
 * 💾 **Persistence**: Implement a strategy to save data to disk so it can survive a server restart. This could be either:
     * **AOF** (Append-Only File): Log every write command to a file.
