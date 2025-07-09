@@ -8,20 +8,15 @@ This project was built as a deep dive into low-level networking, advanced concur
 
 ## ✨ Features
 * **🚀 High-Performance Concurrent Architecture**:
-    * The data store is sharded across multiple partitions, each protected by its own `RWMutex` (Read-Write Lock).
-    * This allows for true parallel processing of commands on different keys, minimizing lock contention and maximizing throughput.
+    * The data store is sharded across multiple partitions, each protected by its own `RWMutex`, to allow for parallel command processing and minimize lock contention.
 * **🔌 Concurrent TCP Server**: Handles multiple simultaneous clients using Goroutines.
 * **📝 RESP Parser**: Decodes client commands from the raw network stream.
-* **🧱 Modular Design**: Server logic (`main`), data storage (`KeyValueStore`), and protocol formatting (`resp`) are separated into distinct packages for clean, testable code.
-* **Core Commands Implemented**:
-    * `PING`: Checks for a connection.
-    * `SET key value`: Stores a string value.
-    * `GET key`: Retrieves a string value.
-    * `DEL key [key ...]`: Deletes one or more keys.
-* **Key Expirations**:
-    * `EXPIRE key seconds`: Sets a timeout on a key.
-    * `TTL key`: Inspects the remaining time to live for a key.
-
+* **💾 AOF Persistence**: All write commands are logged to an Append-Only File, allowing the server's state to be recovered after a restart.
+* **🧱 Modular Design**: Server logic, data storage, and protocol formatting are separated into distinct packages for clean, testable code.
+* **🗂️ Data Structures**: Supports multiple data types with type-checking to prevent incorrect operations.
+    * **Strings**: `PING`, `SET`, `GET`, `DEL`
+    * **Expirations**: `EXPIRE`, `TTL`
+    * **Lists**: `LPUSH`, `LPOP`
 ---
 
 ## 🚀 Getting Started
@@ -85,12 +80,9 @@ This project is a foundation. The next major engineering challenges to tackle ar
 
 * 🔬 **Benchmarking**: Write a comprehensive benchmark suite using Go's testing package to measure operations per second and validate the performance gains from the sharded architecture.
 
-* 💾 **Persistence**: Implement a strategy to save data to disk so it can survive a server restart. This could be either:
-    * **AOF** (Append-Only File): Log every write command to a file.
-
-    * **Snapshots**: Periodically dump the entire in-memory dataset to a file.
-
 * 🗂️ **More Data Structures**: Add support for other Redis data types like Lists, Hashes, and Sets.
+
+* **Advanced Persistence**: Implement snapshotting (RDB) as an alternative persistence strategy.
 
 
 ## 📜 License
