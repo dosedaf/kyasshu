@@ -10,6 +10,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -298,20 +299,24 @@ func WriteToFile(f *os.File, cmd []string) error {
 }
 
 func executeCommand(c net.Conn, kv KeyValueStore, cmd []string, f *os.File) {
-	switch cmd[0] {
+	CMD := strings.ToUpper(cmd[0])
+	switch CMD {
 	case "PING":
 		resp.WritePONG(c)
 	case "SET":
 		kv.Set(cmd[1], cmd[2])
 
 		aofMtx.Lock()
+		defer aofMtx.Unlock()
+
 		err := WriteToFile(f, cmd)
 		if err != nil {
 			log.Print(err)
+			resp.WriteNull(c)
+		} else {
+			resp.WriteOK(c)
 		}
-		aofMtx.Unlock()
 
-		resp.WriteOK(c)
 	case "GET":
 		val, err := kv.Get(cmd[1])
 		if err != nil {
@@ -381,7 +386,8 @@ func executeCommand(c net.Conn, kv KeyValueStore, cmd []string, f *os.File) {
 }
 
 func executeCommandFromAOF(kv KeyValueStore, cmd []string) error {
-	switch cmd[0] {
+	CMD := strings.ToUpper(cmd[0])
+	switch CMD {
 	case "SET":
 		kv.Set(cmd[1], cmd[2])
 

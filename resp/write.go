@@ -32,6 +32,10 @@ func WriteERR(c net.Conn, msg string) {
 	c.Write([]byte(resp))
 }
 
+func WriteNull(c net.Conn) {
+	c.Write([]byte(""))
+}
+
 func SerializeCommand(cmd []string) []byte {
 	var result []byte
 
