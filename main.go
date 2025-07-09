@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"os"
 	"slices"
 	"strconv"
 	"sync"
@@ -18,6 +20,9 @@ const SHARD_TOTAL = 5
 
 var ErrKeyDoesNotExist = errors.New("key does not exist")
 var ErrKeyExpired = errors.New("key is expired")
+var ErrCommandNotFound = errors.New("commmand not found")
+
+var aofMtx sync.Mutex
 
 type KeyValue struct {
 	value     string
@@ -213,20 +218,60 @@ func main() {
 	}
 	defer l.Close()
 
+	// open
+	f, err := os.OpenFile("aof.txt", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	defer f.Close()
+
 	kv := NewKeyValueStore(SHARD_TOTAL)
+
+	fileInfo, err := os.Stat("aof.txt")
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	if fileInfo.Size() != 0 {
+		t, err := os.Open("aof.txt")
+		if err != nil {
+			log.Fatal("could not open AOF file:", err)
+		}
+		defer t.Close()
+
+		reader := bufio.NewReader(t)
+
+		for {
+			cmd, err := resp.Parse(reader)
+
+			if err != nil {
+				if err == io.EOF {
+					break
+				}
+
+				log.Fatal("error loading from AOF:", err)
+			}
+
+			executeCommandFromAOF(kv, cmd)
+		}
+
+		log.Println("Kyasshu loaded data from AOF file.")
+	}
 
 	for {
 		c, err := l.Accept()
 		if err != nil {
-			fmt.Println(err)
+			log.Print(err)
 			return
 		}
 
-		go handleConnection(c, kv)
+		go handleConnection(c, kv, f)
 	}
 }
 
-func handleConnection(c net.Conn, kv KeyValueStore) {
+func handleConnection(c net.Conn, kv KeyValueStore, f *os.File) {
 	reader := bufio.NewReader(c)
 	defer c.Close()
 
@@ -237,65 +282,126 @@ func handleConnection(c net.Conn, kv KeyValueStore) {
 			return
 		}
 
-		switch cmd[0] {
-		case "PING":
-			resp.WritePONG(c)
-		case "SET":
-			kv.Set(cmd[1], cmd[2])
+		executeCommand(c, kv, cmd, f)
+		fmt.Println(cmd)
+	}
+}
 
-			resp.WriteOK(c)
-		case "GET":
-			val, err := kv.Get(cmd[1])
-			if err != nil {
-				if errors.Is(err, ErrKeyDoesNotExist) {
-					resp.WriteNullBulkString(c)
-				} else if errors.Is(err, ErrKeyExpired) {
-					resp.WriteNullBulkString(c)
-				} else { // i don't think there are other errors but okay
-					resp.WriteNullBulkString(c)
-				}
-			} else {
-				resp.WriteBulkString(c, val)
+func WriteToFile(f *os.File, cmd []string) error {
+	cmdSerialized := resp.SerializeCommand(cmd)
+	_, err := f.Write(cmdSerialized)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func executeCommand(c net.Conn, kv KeyValueStore, cmd []string, f *os.File) {
+	switch cmd[0] {
+	case "PING":
+		resp.WritePONG(c)
+	case "SET":
+		kv.Set(cmd[1], cmd[2])
+
+		aofMtx.Lock()
+		err := WriteToFile(f, cmd)
+		if err != nil {
+			log.Print(err)
+		}
+		aofMtx.Unlock()
+
+		resp.WriteOK(c)
+	case "GET":
+		val, err := kv.Get(cmd[1])
+		if err != nil {
+			if errors.Is(err, ErrKeyDoesNotExist) {
+				resp.WriteNullBulkString(c)
+			} else if errors.Is(err, ErrKeyExpired) {
+				resp.WriteNullBulkString(c)
+			} else { // i don't think there are other errors but okay
+				resp.WriteNullBulkString(c)
 			}
-
-		case "EXPIRE":
-			err := kv.Expire(cmd[1], cmd[2])
-			if err != nil {
-				// doesnt matter what's the error, we do this
-				resp.WriteInteger(c, 0)
-			} else {
-				resp.WriteInteger(c, 1)
-			}
-
-		case "TTL":
-			remainingSeconds, err := kv.TTL(cmd[1])
-			if err != nil {
-				if errors.Is(err, ErrKeyDoesNotExist) {
-					resp.WriteInteger(c, -2)
-				} else if errors.Is(err, ErrKeyExpired) {
-					resp.WriteInteger(c, -2)
-				} else {
-					resp.WriteInteger(c, -2)
-				}
-			} else {
-				// no expiration
-				if remainingSeconds == -1 {
-					resp.WriteInteger(c, -1)
-				} else {
-					resp.WriteInteger(c, int(remainingSeconds))
-				}
-			}
-
-		case "DEL":
-			keys := slices.Clone(cmd[1:])
-
-			deleted := kv.Delete(keys)
-
-			resp.WriteInteger(c, deleted)
-		default:
-			resp.WriteERR(c, "unknown command")
+		} else {
+			resp.WriteBulkString(c, val)
 		}
 
-		fmt.Println(cmd)
+	case "EXPIRE":
+		err := kv.Expire(cmd[1], cmd[2])
+		if err != nil {
+			// doesnt matter what's the error, we do this
+			resp.WriteInteger(c, 0)
+		} else {
+			aofMtx.Lock()
+			err := WriteToFile(f, cmd)
+			if err != nil {
+				log.Print(err)
+			}
+			aofMtx.Unlock()
+
+			resp.WriteInteger(c, 1)
+		}
+
+	case "TTL":
+		remainingSeconds, err := kv.TTL(cmd[1])
+		if err != nil {
+			if errors.Is(err, ErrKeyDoesNotExist) {
+				resp.WriteInteger(c, -2)
+			} else if errors.Is(err, ErrKeyExpired) {
+				resp.WriteInteger(c, -2)
+			} else {
+				resp.WriteInteger(c, -2)
+			}
+		} else {
+			// no expiration
+			if remainingSeconds == -1 {
+				resp.WriteInteger(c, -1)
+			} else {
+				resp.WriteInteger(c, int(remainingSeconds))
+			}
+		}
+
+	case "DEL":
+		keys := slices.Clone(cmd[1:])
+
+		deleted := kv.Delete(keys)
+
+		aofMtx.Lock()
+		err := WriteToFile(f, cmd)
+		if err != nil {
+			log.Print(err)
+		}
+		aofMtx.Unlock()
+
+		resp.WriteInteger(c, deleted)
+	default:
+		resp.WriteERR(c, "unknown command")
+	}
+
+}
+
+func executeCommandFromAOF(kv KeyValueStore, cmd []string) error {
+	switch cmd[0] {
+	case "SET":
+		kv.Set(cmd[1], cmd[2])
+
+		return nil
+	case "EXPIRE":
+		err := kv.Expire(cmd[1], cmd[2])
+		if err != nil {
+			return err
+		} else {
+			return nil
+		}
+
+	case "DEL":
+		keys := slices.Clone(cmd[1:])
+
+		_ = kv.Delete(keys)
+
+		return nil
+
+	default:
+		return ErrCommandNotFound
 	}
 }
